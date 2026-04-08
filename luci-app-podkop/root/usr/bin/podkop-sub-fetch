@@ -1,0 +1,72 @@
+#!/bin/sh
+set -eu
+
+SUBSCRIPTION_URL="${1:-}"
+USER_AGENT="Podkop-Sub-Fetch/1.0"
+
+json_escape() {
+  printf '%s' "$1" | sed ':a;N;$!ba;s/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g; s/\n/\\n/g'
+}
+
+json_fail() {
+  msg="$(json_escape "$1")"
+  printf '{"ok":false,"message":"%s","count":0,"links":[]}\n' "$msg"
+}
+
+extract_links() {
+  grep -oE '(vless|ss|trojan|socks4|socks5|hy2|hysteria2)://[^[:space:]"<>\\]+' "$1" 2>/dev/null || true
+}
+
+[ -n "$SUBSCRIPTION_URL" ] || {
+  json_fail "Subscription URL is empty"
+  exit 0
+}
+
+TMP_RAW="/tmp/podkop-sub-fetch.$$.$(date +%s).raw"
+TMP_DEC="/tmp/podkop-sub-fetch.$$.$(date +%s).dec"
+TMP_OUT="/tmp/podkop-sub-fetch.$$.$(date +%s).out"
+
+cleanup() {
+  rm -f "$TMP_RAW" "$TMP_DEC" "$TMP_OUT"
+}
+trap cleanup EXIT INT TERM
+
+if ! curl -LfsS --connect-timeout 10 --max-time 45 -A "$USER_AGENT" -o "$TMP_RAW" "$SUBSCRIPTION_URL" 2>/dev/null; then
+  json_fail "Failed to download subscription"
+  exit 0
+fi
+
+LINKS="$(extract_links "$TMP_RAW")"
+
+if [ -z "$LINKS" ]; then
+  if base64 -d "$TMP_RAW" >"$TMP_DEC" 2>/dev/null; then
+    LINKS="$(extract_links "$TMP_DEC")"
+  else
+    B64="$(tr -d '\r\n\t ' < "$TMP_RAW")"
+    if [ -n "$B64" ] && printf '%s' "$B64" | base64 -d >"$TMP_DEC" 2>/dev/null; then
+      LINKS="$(extract_links "$TMP_DEC")"
+    fi
+  fi
+fi
+
+printf '%s\n' "$LINKS" | awk 'NF && !seen[$0]++' > "$TMP_OUT"
+COUNT="$(grep -c . "$TMP_OUT" 2>/dev/null || true)"
+
+if [ "${COUNT:-0}" -eq 0 ]; then
+  json_fail "No supported proxy links found"
+  exit 0
+fi
+
+printf '{"ok":true,"count":%s,"links":[' "$COUNT"
+first=1
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  esc="$(json_escape "$line")"
+  if [ "$first" -eq 1 ]; then
+    first=0
+  else
+    printf ','
+  fi
+  printf '"%s"' "$esc"
+done < "$TMP_OUT"
+printf ']}\n'

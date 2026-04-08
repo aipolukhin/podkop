@@ -8,6 +8,9 @@
         ],
         "/usr/bin/podkop": [
           "exec"
+        ],
+        "/usr/bin/podkop-sub-fetch": [
+          "exec"
         ]
       },
       "ubus": {

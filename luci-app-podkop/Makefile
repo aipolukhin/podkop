@@ -7,7 +7,7 @@ PKG_VERSION := $(if $(PODKOP_VERSION),$(PODKOP_VERSION),0.$(shell date +%d%m%Y))
 PKG_RELEASE:=1
 
 LUCI_TITLE:=LuCI podkop app
-LUCI_DEPENDS:=+luci-base +podkop
+LUCI_DEPENDS:=+luci-base +podkop +curl +coreutils-base64
 LUCI_PKGARCH:=all
 LUCI_LANG.ru:=Русский (Russian)
 LUCI_LANG.en:=English

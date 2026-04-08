@@ -2,8 +2,24 @@
 "require form";
 "require baseclass";
 "require ui";
+"require fs";
 "require tools.widgets as widgets";
 "require view.podkop.main as main";
+
+
+async function fetchSubscriptionLinks(url) {
+  try {
+    const res = await fs.exec("/usr/bin/podkop-sub-fetch", [url]);
+    return JSON.parse(res?.stdout || "{}");
+  } catch (err) {
+    return {
+      ok: false,
+      message: err?.message || _("Failed to fetch subscription"),
+      count: 0,
+      links: [],
+    };
+  }
+}
 
 function createSectionContent(section) {
   let o = section.option(
@@ -29,6 +45,97 @@ function createSectionContent(section) {
   o.value("outbound", _("Outbound Config"));
   o.default = "url";
   o.depends("connection_type", "proxy");
+
+  o = section.option(
+    form.Value,
+    "subscription_url",
+    _("Subscription URL"),
+    _("Download links from subscription into Selector / URLTest proxy lists"),
+  );
+  o.depends("proxy_config_type", "selector");
+  o.depends("proxy_config_type", "urltest");
+  o.rmempty = true;
+  o.validate = function (section_id, value) {
+    if (!value || value.length === 0) {
+      return true;
+    }
+
+    const validation = main.validateUrl(value);
+
+    if (validation.valid) {
+      return true;
+    }
+
+    return validation.message;
+  };
+
+  o = section.option(
+    form.Button,
+    "_get_subscription",
+    _("Get Subs"),
+    _("Fill the current Selector / URLTest list from the subscription link"),
+  );
+  o.depends("proxy_config_type", "selector");
+  o.depends("proxy_config_type", "urltest");
+  o.inputstyle = "apply";
+  o.inputtitle = _("Get Subs");
+  o.onclick = async function (ev, section_id) {
+    const subOpt = this.map.lookupOption("subscription_url", section_id)?.[0];
+    const modeOpt = this.map.lookupOption("proxy_config_type", section_id)?.[0];
+    const url = subOpt ? subOpt.formvalue(section_id) || "" : "";
+
+    if (!url) {
+      ui.addNotification(null, E("p", {}, _("Subscription URL is empty")));
+      return;
+    }
+
+    const parsed = await fetchSubscriptionLinks(url);
+
+    if (!parsed || parsed.ok === false) {
+      ui.addNotification(
+        null,
+        E("p", {}, parsed?.message || _("Failed to fetch subscription")),
+      );
+      return;
+    }
+
+    const mode = modeOpt ? modeOpt.formvalue(section_id) || "" : "";
+    const targetField =
+      mode === "selector" ? "selector_proxy_links" : "urltest_proxy_links";
+    const targetOpt = this.map.lookupOption(targetField, section_id)?.[0];
+
+    if (!targetOpt) {
+      ui.addNotification(
+        null,
+        E("p", {}, _("Target proxy list field not found")),
+      );
+      return;
+    }
+
+    const targetUi = targetOpt.getUIElement(section_id);
+
+    if (!targetUi || !targetUi.setValue) {
+      ui.addNotification(
+        null,
+        E("p", {}, _("Target proxy list field is not ready")),
+      );
+      return;
+    }
+
+    targetUi.setValue(Array.isArray(parsed.links) ? parsed.links : []);
+
+    ui.addNotification(
+      null,
+      E(
+        "p",
+        {},
+        _("Loaded %s links from subscription").format(
+          String(parsed.count || parsed.links?.length || 0),
+        ),
+      ),
+    );
+  };
+
 
   o = section.option(
     form.TextValue,
